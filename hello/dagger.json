@@ -1,0 +1,4 @@
+{
+  "name": "hello",
+  "sdk": "github.com/ibuildthecloud/daggerverse/amlsdk@main"
+}

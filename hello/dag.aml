@@ -1,0 +1,15 @@
+// Fancy hello
+define Hello: {
+    greeting: "Hello"
+    name: "World"
+
+    // Say hi
+    Message: function string {
+        return: "\(self.greeting) \(self.name)"
+    }
+
+    // Say hi, but loudly
+    Shout: function string {
+        return: std.toUpper(self.Message()) + "!!!!!!"
+    }
+}
