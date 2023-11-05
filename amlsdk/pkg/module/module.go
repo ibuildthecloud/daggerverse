@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"dagger.io/dagger"
+	"github.com/acorn-io/aml/pkg/eval"
 	"github.com/acorn-io/aml/pkg/value"
 )
 
@@ -21,7 +22,7 @@ func isPublic(name string) bool {
 
 func toTypeDef(ctx context.Context, dag *dagger.Client, typeDef value.Schema) (*dagger.TypeDef, error) {
 	if typeDef == nil {
-		return dag.TypeDef().WithKind(dagger.Voidkind), nil
+		return dag.TypeDef().WithKind(dagger.Voidkind).WithOptional(true), nil
 	}
 
 	kind := typeDef.TargetKind()
@@ -72,7 +73,12 @@ func fieldToFunction(ctx context.Context, dag *dagger.Client,
 		return nil, false, nil
 	}
 
-	returnSchema, ok, err := field.Schema.FuncSchema.Returns(ctx)
+	return funcToFunction(ctx, dag, field.Key, field.Description, field.Schema.FuncSchema)
+}
+
+func funcToFunction(ctx context.Context, dag *dagger.Client,
+	funcName, funcDescription string, funcSchema *value.FuncSchema) (*dagger.Function, bool, error) {
+	returnSchema, ok, err := funcSchema.Returns(ctx)
 	if err != nil {
 		return nil, false, err
 	} else if !ok {
@@ -84,9 +90,9 @@ func fieldToFunction(ctx context.Context, dag *dagger.Client,
 		return nil, false, err
 	}
 
-	dagFunc := dag.Function(field.Key, returnType).WithDescription(field.Description)
+	dagFunc := dag.Function(funcName, returnType).WithDescription(funcDescription)
 
-	for _, arg := range field.Schema.FuncSchema.Args {
+	for _, arg := range funcSchema.Args {
 		if arg.Match {
 			continue
 		}
@@ -142,7 +148,7 @@ func isValidFuncField(field value.ObjectSchemaField) bool {
 		!field.Match
 }
 
-func getOrCreateObject(ctx context.Context, dag *dagger.Client, name, description string,
+func getOrCreateObject(dag *dagger.Client, name, description string,
 	types map[string]*dagger.TypeDef) *dagger.TypeDef {
 	ts, ok := types[name]
 	if ok {
@@ -156,12 +162,43 @@ func getOrCreateObject(ctx context.Context, dag *dagger.Client, name, descriptio
 	return obj
 }
 
-func Register(ctx context.Context, dag *dagger.Client, v value.Value) (*dagger.Module, error) {
+func typeSchemaToObject(ctx context.Context, dag *dagger.Client, types map[string]*dagger.TypeDef, objName string, ts *value.TypeSchema) error {
+	obj := getOrCreateObject(dag, objName, ts.Object.Description, types)
+
+	for _, field := range ts.Object.Fields {
+		if isValidFuncField(field) {
+			f, ok, err := fieldToFunction(ctx, dag, field)
+			if err != nil {
+				return err
+			} else if !ok {
+				continue
+			}
+			obj = obj.WithFunction(f)
+			types[objName] = obj
+			continue
+		}
+
+		if value.IsSimpleKind(field.Schema.TargetKind()) && len(field.Key) > 0 && strings.ToLower(field.Key[:1]) == field.Key[:1] {
+			t, err := toTypeDef(ctx, dag, field.Schema)
+			if err != nil {
+				return err
+			}
+			obj = obj.WithField(field.Key, t)
+			types[objName] = obj
+
+			obj = obj.WithFunction(dag.Function("With"+strings.ToUpper(field.Key[:1])+field.Key[1:], obj).
+				WithDescription(fmt.Sprintf("Set %s field", field.Key)).
+				WithArg(field.Key, t))
+			types[objName] = obj
+			continue
+		}
+	}
+
+	return nil
+}
+
+func Register(ctx context.Context, dag *dagger.Client, moduleName string, v value.Value) (*dagger.Module, error) {
 	module := dag.CurrentModule()
-	//defaultObjectName, err := module.Name(ctx)
-	//if err != nil {
-	//	return nil, err
-	//}
 
 	entries, err := value.Entries(v)
 	if err != nil {
@@ -170,68 +207,26 @@ func Register(ctx context.Context, dag *dagger.Client, v value.Value) (*dagger.M
 	var types = map[string]*dagger.TypeDef{}
 
 	for _, entry := range entries {
-		if !isPublic(entry.Key) {
-			continue
-		}
-
 		ts, ok := entry.Value.(*value.TypeSchema)
-		if !ok || ts.Object == nil {
+		if ok && isPublic(entry.Key) && ts.Object != nil {
+			if err := typeSchemaToObject(ctx, dag, types, entry.Key, ts); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
-		objName := entry.Key
-		obj := getOrCreateObject(ctx, dag, objName, ts.Object.Description, types)
-
-		for _, field := range ts.Object.Fields {
-			if isValidFuncField(field) {
-				f, ok, err := fieldToFunction(ctx, dag, field)
-				if err != nil {
-					return nil, err
-				} else if !ok {
-					continue
-				}
-				obj = obj.WithFunction(f)
-				types[entry.Key] = obj
+		if f, ok := entry.Value.(*eval.Function); ok {
+			daggerFunc, ok, err := funcToFunction(ctx, dag, entry.Key, "", f.FuncSchema)
+			if err != nil {
+				return nil, err
+			} else if !ok {
 				continue
 			}
 
-			if value.IsSimpleKind(field.Schema.TargetKind()) && len(field.Key) > 0 && strings.ToLower(field.Key[:1]) == field.Key[:1] {
-				t, err := toTypeDef(ctx, dag, field.Schema)
-				if err != nil {
-					return nil, err
-				}
-				obj = obj.WithField(field.Key, t)
-				types[entry.Key] = obj
-
-				obj = obj.WithFunction(dag.Function("With"+strings.ToUpper(field.Key[:1])+field.Key[1:], obj).
-					WithDescription(fmt.Sprintf("Set %s field", field.Key)).
-					WithArg(field.Key, t))
-				types[entry.Key] = obj
-				continue
-			}
-
-			//}
-			//
-			//if !isValidObjectField(field) {
-			//	continue
-			//}
-			//
-			//obj := getOrCreateObject(ctx, dag, field.Key, field.Schema.Object.Description, types)
-			//
-			//for _, field := range ts.Object.Fields {
-			//	if !isValidFuncField(field) {
-			//		continue
-			//	}
-			//
-			//	f, ok, err := fieldToFunction(ctx, dag, field)
-			//	if err != nil {
-			//		return nil, err
-			//	} else if !ok {
-			//		continue
-			//	}
-			//
-			//	obj = obj.WithFunction(f)
-			//}
+			obj := getOrCreateObject(dag, moduleName, "", types)
+			obj = obj.WithFunction(daggerFunc)
+			types[moduleName] = obj
+			continue
 		}
 	}
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"dagger.io/dagger"
 	"dagger.io/dagger/querybuilder"
@@ -22,12 +21,7 @@ type Object struct {
 }
 
 func (o Object) Keys() (result []string, _ error) {
-	for _, field := range o.currentType.Fields {
-		if isScalar(field.TypeRef) {
-			result = append(result, field.Name)
-		}
-	}
-	return
+	return nil, nil
 }
 
 func (o Object) XXX_GraphQLType() string {
@@ -88,7 +82,7 @@ func (o Object) LookupValue(key value.Value) (value.Value, bool, error) {
 	}
 
 	for _, field := range o.currentType.Fields {
-		if !strings.EqualFold(field.Name, name) {
+		if field.Name != name {
 			continue
 		}
 
@@ -104,7 +98,18 @@ func (o Object) LookupValue(key value.Value) (value.Value, bool, error) {
 		return result, true, nil
 	}
 
+	returnType := o.schema.Types.Get(name)
+	if returnType != nil {
+		return Type{
+			typeName: name,
+		}, true, nil
+	}
+
 	return nil, false, nil
+}
+
+func (o Object) RightMerge(right value.Value) (value.Value, error) {
+	return value.Merge(right, o)
 }
 
 func (o Object) Merge(right value.Value) (value.Value, error) {

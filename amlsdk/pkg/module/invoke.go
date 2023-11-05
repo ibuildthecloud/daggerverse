@@ -17,8 +17,8 @@ const (
 )
 
 func Invoke(ctx context.Context, dag *dagger.Client, v value.Value) error {
-	if _, ok := isForceModule(); ok {
-		_, err := Register(ctx, dag, v)
+	if moduleName, ok := isForceModule(); ok {
+		_, err := Register(ctx, dag, moduleName, v)
 		return err
 	}
 
@@ -59,6 +59,7 @@ func Invoke(ctx context.Context, dag *dagger.Client, v value.Value) error {
 	if err != nil {
 		return err
 	}
+
 	resultBytes, err := json.Marshal(result)
 	if err != nil {
 		return err
@@ -127,7 +128,11 @@ func trySetField(schema, obj value.Value, fnName string, argsValues map[string]v
 
 func invoke(ctx context.Context, dag *dagger.Client, v value.Value, parentJSON []byte, parentName string, fnName string, inputArgs map[string][]byte) (any, error) {
 	if parentName == "" {
-		return Register(ctx, dag, v)
+		moduleName, err := dag.CurrentModule().Name(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return Register(ctx, dag, moduleName, v)
 	}
 
 	parentData, err := toParent(parentJSON)
@@ -144,27 +149,39 @@ func invoke(ctx context.Context, dag *dagger.Client, v value.Value, parentJSON [
 }
 
 func call(ctx context.Context, v value.Value, parentData *value.Object, parentName string, fnName string, argValues map[string]value.Value) (any, error) {
+	var (
+		result   value.Value
+		function value.Value
+	)
+
 	obj, ok, err := value.Lookup(v, value.NewValue(parentName))
 	if err != nil {
 		return nil, err
 	} else if !ok {
-		return nil, fmt.Errorf("object now found: %s", parentName)
-	}
-
-	result, err := value.Validate(ctx, obj, parentData)
-	if err != nil {
-		return nil, err
-	}
-
-	function, ok, err := value.Lookup(result, value.NewValue(fnName))
-	if err != nil {
-		return nil, err
-	} else if !ok {
-		newResult, ok, newErr := trySetField(obj, result, fnName, argValues)
-		if newErr == nil && ok {
-			return newResult, nil
+		f, fOk, fErr := value.Lookup(v, value.NewValue(fnName))
+		if fErr == nil && fOk {
+			function = f
+		} else {
+			return nil, fmt.Errorf("object now found: %s", parentName)
 		}
-		return nil, fmt.Errorf("function not found %s on object %s", fnName, parentName)
+	} else if ok {
+		result, err = value.Validate(ctx, obj, parentData)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if result != nil {
+		function, ok, err = value.Lookup(result, value.NewValue(fnName))
+		if err != nil {
+			return nil, err
+		} else if !ok {
+			newResult, ok, newErr := trySetField(obj, result, fnName, argValues)
+			if newErr == nil && ok {
+				return newResult, nil
+			}
+			return nil, fmt.Errorf("function not found %s on object %s", fnName, parentName)
+		}
 	}
 
 	var args []value.CallArgument
@@ -177,9 +194,11 @@ func call(ctx context.Context, v value.Value, parentData *value.Object, parentNa
 		})
 	}
 
-	ret, _, err := value.Call(ctx, function, args...)
+	ret, ok, err := value.Call(ctx, function, args...)
 	if err != nil {
 		return nil, err
+	} else if !ok {
+		return nil, nil
 	}
 
 	nv, _, err := value.NativeValue(ret)
@@ -187,7 +206,7 @@ func call(ctx context.Context, v value.Value, parentData *value.Object, parentNa
 }
 
 func isForceModule() (string, bool) {
-	env := os.Getenv("DAGGIT_MODULE")
+	env := os.Getenv("DAGAMOLE_MODULE")
 	return env, env != ""
 }
 
