@@ -57,7 +57,8 @@ func Invoke(ctx context.Context, dag *dagger.Client, v value.Value) error {
 
 	result, err := invoke(ctx, dag, v, []byte(parentJson), parentName, fnName, inputArgs)
 	if err != nil {
-		return err
+		args, _ := json.Marshal(inputArgs)
+		return fmt.Errorf("failed to invoke (%s) %s.%s with %s: %v", parentJson, parentName, fnName, args, err)
 	}
 
 	resultBytes, err := json.Marshal(result)

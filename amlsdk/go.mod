@@ -7,7 +7,7 @@ replace github.com/dagger/dagger/internal/mage => ../../dagger/internal/mage
 
 require (
 	dagger.io/dagger v0.9.3
-	github.com/acorn-io/aml v0.0.0-20231105062848-9867643b1ae7
+	github.com/acorn-io/aml v0.0.0-20231106071231-26ca3a01201a
 	github.com/dagger/dagger v0.9.3
 )
 

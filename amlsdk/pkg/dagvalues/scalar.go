@@ -62,5 +62,5 @@ func (s Scalar) Call(ctx context.Context, args []value.CallArgument) (value.Valu
 }
 
 func (s Scalar) Kind() value.Kind {
-	return value.FuncKind
+	return "dagger:scalar"
 }

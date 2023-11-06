@@ -93,7 +93,7 @@ func (f Function) buildObject(args []value.CallArgument) (Object, error) {
 }
 
 func (f Function) Kind() value.Kind {
-	return value.FuncKind
+	return "dagger:function"
 }
 
 type Enum string

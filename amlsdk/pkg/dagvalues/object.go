@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"dagger.io/dagger"
 	"dagger.io/dagger/querybuilder"
@@ -18,10 +19,6 @@ type Object struct {
 	dag         *dagger.Client
 	schema      *introspection.Schema
 	currentType *introspection.Type
-}
-
-func (o Object) Keys() (result []string, _ error) {
-	return nil, nil
 }
 
 func (o Object) XXX_GraphQLType() string {
@@ -63,8 +60,12 @@ func (o Object) XXX_GraphQLID(ctx context.Context) (string, error) {
 	return value.ToString(v)
 }
 
+func (o Object) Eq(right value.Value) (value.Value, error) {
+	return value.NewValue(o.Kind() == right.Kind()), nil
+}
+
 func (o Object) String() string {
-	return "dagger:type:" + o.currentType.Name
+	return string(o.Kind())
 }
 
 func (o Object) NativeValue() (any, bool, error) {
@@ -101,54 +102,21 @@ func (o Object) LookupValue(key value.Value) (value.Value, bool, error) {
 	returnType := o.schema.Types.Get(name)
 	if returnType != nil {
 		return Type{
-			typeName: name,
+			dag:         o.dag,
+			schema:      o.schema,
+			currentType: returnType,
 		}, true, nil
 	}
 
 	return nil, false, nil
 }
 
-func (o Object) RightMerge(right value.Value) (value.Value, error) {
-	return value.Merge(right, o)
-}
-
-func (o Object) Merge(right value.Value) (value.Value, error) {
-	entries, err := value.Entries(right)
-	if err != nil {
-		return nil, err
-	}
-
-	result := value.Value(o)
-	for _, entry := range entries {
-		call, ok, err := value.Lookup(result, value.NewValue(entry.Key))
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
-		if _, ok := call.(Scalar); ok {
-			return nil, fmt.Errorf("scalars can not be defined as an object, only used for lookup, invalid key [%s]", entry.Key)
-		}
-
-		args := []value.CallArgument{{Value: entry.Value}}
-		if entry.Value.Kind() != value.ObjectKind {
-			args[0].Positional = true
-		}
-
-		newValue, ok, err := value.Call(context.Background(), call, args...)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
-		result = newValue
-	}
-
-	return result, nil
+func (o Object) Compatible(kind value.Kind) bool {
+	return kind == value.ObjectKind ||
+		kind == value.StringKind ||
+		strings.HasPrefix(string(kind), "dag.")
 }
 
 func (o Object) Kind() value.Kind {
-	return value.ObjectKind
+	return value.Kind("dag." + o.currentType.Name)
 }

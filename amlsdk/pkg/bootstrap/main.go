@@ -46,7 +46,7 @@ func Main(ctx context.Context) error {
 		return err
 	}
 
-	globals["dagger"], err = dagvalues.Dagger(ctx, c)
+	globals["dag"], err = dagvalues.Dagger(ctx, c)
 	if err != nil {
 		return err
 	}

@@ -52,9 +52,9 @@ func toTypeDef(ctx context.Context, dag *dagger.Client, typeDef value.Schema) (*
 		return dag.TypeDef().WithListOf(itemType), nil
 	}
 
-	typeName := typeDef.GetPath()
-	if strings.HasPrefix(typeName, "dagger.") {
-		typeName = strings.TrimPrefix(typeName, "dagger.")
+	typeName := typeDef.GetPath().String()
+	if strings.HasPrefix(typeName, "dag.") {
+		typeName = strings.TrimPrefix(typeName, "dag.")
 	} else {
 		typeName = strings.ReplaceAll(typeName, ".", "")
 	}
@@ -64,16 +64,18 @@ func toTypeDef(ctx context.Context, dag *dagger.Client, typeDef value.Schema) (*
 
 func fieldToFunction(ctx context.Context, dag *dagger.Client,
 	field value.ObjectSchemaField) (*dagger.Function, bool, error) {
+	ts, isTypeSchema := field.Schema.(*value.TypeSchema)
 	if !isPublic(field.Key) ||
 		field.Schema == nil ||
 		field.Schema.TargetKind() != value.FuncKind ||
-		field.Schema.FuncSchema == nil ||
+		!isTypeSchema ||
+		ts.FuncSchema == nil ||
 		field.Optional ||
 		field.Match {
 		return nil, false, nil
 	}
 
-	return funcToFunction(ctx, dag, field.Key, field.Description, field.Schema.FuncSchema)
+	return funcToFunction(ctx, dag, field.Key, field.Description, ts.FuncSchema)
 }
 
 func funcToFunction(ctx context.Context, dag *dagger.Client,
@@ -106,10 +108,6 @@ func funcToFunction(ctx context.Context, dag *dagger.Client,
 			defaultValue dagger.JSON
 		)
 
-		if arg.Optional {
-			argType = argType.WithOptional(arg.Optional)
-		}
-
 		def, ok, err := value.DefaultValue(arg.Schema)
 		if err != nil {
 			return nil, false, err
@@ -121,6 +119,11 @@ func funcToFunction(ctx context.Context, dag *dagger.Client,
 			}
 			defaultValue = dagger.JSON(defValue)
 		}
+
+		if arg.Optional || len(defaultValue) > 0 {
+			argType = argType.WithOptional(true)
+		}
+
 		dagFunc = dagFunc.WithArg(arg.Key, argType, dagger.FunctionWithArgOpts{
 			Description:  description,
 			DefaultValue: defaultValue,
@@ -130,20 +133,13 @@ func funcToFunction(ctx context.Context, dag *dagger.Client,
 	return dagFunc, true, nil
 }
 
-func isValidObjectField(field value.ObjectSchemaField) bool {
-	return isPublic(field.Key) &&
-		field.Schema != nil &&
-		field.Schema.TargetKind() == value.ObjectKind &&
-		field.Schema.Object != nil &&
-		!field.Optional &&
-		!field.Match
-}
-
 func isValidFuncField(field value.ObjectSchemaField) bool {
+	ts, isTypeSchema := field.Schema.(*value.TypeSchema)
 	return isPublic(field.Key) &&
 		field.Schema != nil &&
 		field.Schema.TargetKind() == value.FuncKind &&
-		field.Schema.FuncSchema != nil &&
+		isTypeSchema &&
+		ts.FuncSchema != nil &&
 		!field.Optional &&
 		!field.Match
 }
