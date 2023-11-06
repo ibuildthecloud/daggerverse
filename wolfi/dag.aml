@@ -1,0 +1,45 @@
+let baseImage: "cgr.dev/chainguard/wolfi-base"
+
+Base: function Config {
+    return: {}
+}
+
+define Config: {
+    overlays: [dag.Container]
+    packages: [string]
+
+    WithPackage: function Config {
+        args: name: string
+        return: self + {
+            packages: self.packages + [args.name]
+        }
+    }
+
+    WithPackages: function Config {
+        args: packages: [string]
+        return: self + {
+            packages: self.packages + args.packages
+        }
+    }
+
+    WithOverlay: function Config {
+        args: image: dag.Container
+        return: self + {
+            overlays: self.overlays + [args.image]
+        }
+    }
+
+    Container: function dag.Container {
+        for overlay in self.overlays {
+            ctr: prev.ctr.withDirectory("/", overlay.rootfs()).withExec(["ldconfig"])
+        } else {
+            ctr: dag.container().from(baseImage)
+        }
+
+        if len(packages) > 0 {
+            return: ctr.withExec(["apk", "add"] + packages)
+        } else {
+            return: ctr
+        }
+    }
+}
